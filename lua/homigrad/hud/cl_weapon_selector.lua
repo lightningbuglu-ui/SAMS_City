@@ -51,6 +51,29 @@ local scrW, scrH = ScrW(), ScrH()
 local AcsentColor = Color(155,0,0)
 local gradient_u = Material("vgui/gradient-d")
 
+-- Wheel layout / feel. Tweak these to taste.
+local WheelHubX      = scrW * 0.03   -- hub sits right against the left edge
+local WheelCenterY   = scrH * 0.5
+local WheelRadius    = scrH * 0.22   -- distance of each slot icon from the hub
+local SlotBoxSize    = scrH * 0.06   -- size of an unselected slot icon
+local SlotBoxSizeSel = scrH * 0.085  -- size of the highlighted slot icon
+local ItemBoxW       = scrW * 0.115  -- width of a weapon row in the expanded slot
+local ItemBoxH       = scrH * 0.045
+local AngleStep      = 24            -- degrees between neighboring slots on the arc
+local RotateSpeed    = 10            -- higher = snappier slide
+local EdgeMargin     = 8             -- min gap kept between any icon and the screen edge
+
+WS.WheelOffset = WS.WheelOffset or 0 -- continuous "which slot is centered" value
+
+-- Slides WS.WheelOffset toward the selected slot's index the short way
+-- around the list (so going from slot 6 back to slot 1 doesn't spin through
+-- every slot in between), without ever letting the value jump.
+local function ApproachIndex(target, current, count, speed)
+    local diff = target - current
+    diff = diff - count * math.floor(diff / count + 0.5)
+    return current + diff * math.min(FrameTime() * speed, 1)
+end
+
 function WS.WeaponSelectorDraw( ply )
     if not IsValid( ply ) or not ply:Alive() or GetGlobalBool("RadialInventory", false) then return end
     if WS.Show < CurTime() then 
@@ -63,78 +86,136 @@ function WS.WeaponSelectorDraw( ply )
     local SelectedWep = WS.GetSelectedWeapon()
     if not IsValid(SelectedWep) then return end
     WS.Transparent = LerpFT( 0.2, WS.Transparent, math.min( WS.Show - CurTime(), 1 ) )
-    --draw.RoundedBox(0,(scrW / 2)-10,(scrH *0.15),20,20, color_red )
-    local SuperAmmout = 0
-    local AmmoutSlots = 0
+
+    -- Gather only the slots that actually have weapons in them, in order.
+    local ActiveSlots = {}
     for i = 0, #Weapons do
-        local slotTbl = Weapons[i]
-        if table.Count(slotTbl) < 1 then continue end
-        AmmoutSlots = AmmoutSlots + 1
+        if table.Count(Weapons[i]) > 0 then
+            ActiveSlots[#ActiveSlots + 1] = i
+        end
+    end
+    local Count = #ActiveSlots
+    if Count < 1 then return end
+
+    -- Where is the currently selected slot in that ordered list?
+    local selJ = 0
+    for j, slotIdx in ipairs(ActiveSlots) do
+        if slotIdx == WS.SelectedSlot then
+            selJ = j - 1
+            break
+        end
     end
 
+    -- Instead of spinning a full 360-degree circle (which could swing icons
+    -- behind the edge of the screen mid-rotation), we slide a fixed, bounded
+    -- arc: each slot sits at a fixed angular distance from whichever slot is
+    -- currently selected. Only WS.WheelOffset moves, and it always takes the
+    -- shortest path, so the motion is smooth and every icon stays on-screen
+    -- the whole time.
+    WS.WheelOffset = ApproachIndex(selJ, WS.WheelOffset, Count, RotateSpeed)
 
-    for i = 0, #Weapons do
-        local slotTbl = Weapons[i]
-        if table.Count(slotTbl) < 1 then continue end
-        local sizeX = scrW*0.1
-        local position = scrW/2 + ( ( SuperAmmout -  (AmmoutSlots/2)) * sizeX )
-        
-        WS.DrawText( i+1, "HomigradFontMedium", position + sizeX/2, scrH*0.02, ColorAlpha(color_white,WS.Transparent*255) ,TEXT_ALIGN_CENTER )
-        
-        --  draw.RoundedBox(
-        --      1,
-        --      position,
-        --      (scrH *0.01),
-        --      sizeX,
-        --      (scrH *0.02), 
-        --      ColorAlpha(color_black,WS.Transparent*255) 
-        --  )
-        --if slotTbl and table.Count(slotTbl) < 0 then continue end
-        local Ammout = 0
-        local lastPos = 0
-        for Id = 0, #slotTbl do
-            wepId = Id
-            local wep = slotTbl[wepId]
-            if not wep then continue end
-            --print(wepId,wep)
-            local sizeH = SelectedWep == wep and (scrH *0.12) or (scrH *0.025)
-            local LastSelected = 0
-            if slotTbl[wepId-1] and SelectedWep == slotTbl[wepId-1] then
-                lastPos = (scrH *0.095) 
-            end
-            draw.RoundedBox(
-                0,
-                position,
-                (scrH * 0.025) * (Ammout) + (scrH * 0.05) + lastPos,
-                sizeX,
-                sizeH, 
-                ColorAlpha(color_black,WS.Transparent*205) 
-            )
-            draw.RoundedBox(
-                0,
-                position,
-                ((scrH * 0.025) * (Ammout) + (scrH * 0.05) + lastPos) + sizeH-2,
-                sizeX,
-                2, 
-                ColorAlpha(color_black,WS.Transparent*205) 
-            )
-            surface.SetDrawColor( 155, 0, 0, WS.Transparent*( SelectedWep == wep and 200 or 0 )  )
-            surface.SetMaterial( gradient_u )
-            surface.DrawTexturedRect( position, (scrH * 0.025) * (Ammout) + (scrH * 0.05) + lastPos, sizeX, sizeH )
-            if SelectedWep == wep then
-                surface.SetDrawColor( 255, 0, 0, WS.Transparent*155 )
-	            surface.DrawOutlinedRect( position, (scrH * 0.025) * (Ammout) + (scrH * 0.05) + lastPos, sizeX, sizeH, 2 )
-            end
-            local sizeHi = (scrH *0.025) * (Ammout) + (scrH * 0.05) + lastPos
-            sizeHi = sizeHi + 2.5
-            WS.DrawText( WS.GetPrintName(wep), "HomigradFontSmall", position + sizeX/2, sizeHi, ColorAlpha(color_white,WS.Transparent*255) ,TEXT_ALIGN_CENTER )
-            Ammout = Ammout + 1
+    -- Backdrop so the wheel always reads clearly against the game world
+    -- behind it, and never looks like it's "behind" anything else.
+    local backdropH = math.min(WheelRadius * 2 + SlotBoxSizeSel, scrH * 0.9)
+    draw.RoundedBox(
+        8,
+        0,
+        WheelCenterY - backdropH/2,
+        WheelHubX + WheelRadius + SlotBoxSizeSel/2 + EdgeMargin,
+        backdropH,
+        ColorAlpha(color_black, WS.Transparent*90)
+    )
 
-            if SelectedWep == wep and wep.DrawWeaponSelection then
-                wep:DrawWeaponSelection(position + 5, (scrH * 0.025) * (Ammout) + (scrH * 0.055) + lastPos, sizeX - 10, sizeH, WS.Transparent*255)
+    for j, slotIdx in ipairs(ActiveSlots) do
+        local slotTbl = Weapons[slotIdx]
+
+        -- Signed distance (in slots) from the centered/selected slot, wrapped
+        -- the short way around so it never exceeds +-Count/2.
+        local relIndex = (j - 1) - WS.WheelOffset
+        relIndex = relIndex - Count * math.floor(relIndex / Count + 0.5)
+
+        local rad = math.rad(relIndex * AngleStep)
+
+        local isSelectedSlot = slotIdx == WS.SelectedSlot
+        local boxSize = isSelectedSlot and SlotBoxSizeSel or SlotBoxSize
+
+        local px = WheelHubX + math.cos(rad) * WheelRadius
+        local py = WheelCenterY + math.sin(rad) * WheelRadius
+
+        -- Clamp so the icon's box can never be clipped by a screen edge,
+        -- regardless of screen size or how far the arc math pushes it.
+        px = math.Clamp(px, boxSize/2 + EdgeMargin, scrW - boxSize/2 - EdgeMargin)
+        py = math.Clamp(py, boxSize/2 + EdgeMargin, scrH - boxSize/2 - EdgeMargin)
+
+        -- spoke from hub to icon
+        surface.SetDrawColor(0, 0, 0, WS.Transparent*120)
+        surface.DrawLine(WheelHubX, WheelCenterY, px, py)
+
+        -- box background, then highlight gradient, then outline, then text
+        -- LAST so the label is always drawn on top and never hidden.
+        draw.RoundedBox(
+            4,
+            px - boxSize/2,
+            py - boxSize/2,
+            boxSize,
+            boxSize,
+            ColorAlpha(color_black, WS.Transparent*215)
+        )
+
+        surface.SetDrawColor( 155, 0, 0, WS.Transparent*( isSelectedSlot and 200 or 0 ) )
+        surface.SetMaterial( gradient_u )
+        surface.DrawTexturedRect( px - boxSize/2, py - boxSize/2, boxSize, boxSize )
+
+        if isSelectedSlot then
+            surface.SetDrawColor( 255, 0, 0, WS.Transparent*155 )
+            surface.DrawOutlinedRect( px - boxSize/2, py - boxSize/2, boxSize, boxSize, 2 )
+        end
+
+        WS.DrawText( slotIdx+1, "HomigradFontMedium", px, py - 8, ColorAlpha(color_white,WS.Transparent*255), TEXT_ALIGN_CENTER )
+
+        -- Expand the highlighted slot's individual weapons out to the right
+        -- of its icon, stacked vertically, same style as the old bar.
+        if isSelectedSlot then
+            local listX = px + boxSize/2 + 15
+            local listCount = table.Count(slotTbl)
+            local listY = math.Clamp(
+                py - (listCount * ItemBoxH) / 2,
+                EdgeMargin,
+                scrH - (listCount * ItemBoxH) - EdgeMargin
+            )
+            listX = math.min(listX, scrW - ItemBoxW - EdgeMargin)
+            local row = 0
+
+            for Id = 0, #slotTbl do
+                local wep = slotTbl[Id]
+                if not wep then continue end
+
+                local py2 = listY + row * ItemBoxH
+                local isSelWep = SelectedWep == wep
+
+                draw.RoundedBox(
+                    0, listX, py2, ItemBoxW, ItemBoxH,
+                    ColorAlpha(color_black, WS.Transparent*215)
+                )
+
+                surface.SetDrawColor( 155, 0, 0, WS.Transparent*( isSelWep and 200 or 0 ) )
+                surface.SetMaterial( gradient_u )
+                surface.DrawTexturedRect( listX, py2, ItemBoxW, ItemBoxH )
+
+                if isSelWep then
+                    surface.SetDrawColor( 255, 0, 0, WS.Transparent*155 )
+                    surface.DrawOutlinedRect( listX, py2, ItemBoxW, ItemBoxH, 2 )
+                end
+
+                WS.DrawText( WS.GetPrintName(wep), "HomigradFontSmall", listX + ItemBoxW/2, py2 + ItemBoxH/2 - 6, ColorAlpha(color_white,WS.Transparent*255), TEXT_ALIGN_CENTER )
+
+                if isSelWep and wep.DrawWeaponSelection then
+                    wep:DrawWeaponSelection(listX + 5, py2 + ItemBoxH + 5, ItemBoxW - 10, ItemBoxH, WS.Transparent*255)
+                end
+
+                row = row + 1
             end
         end
-        SuperAmmout = SuperAmmout + 1
     end
 end
 
